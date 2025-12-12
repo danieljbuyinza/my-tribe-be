@@ -1,5 +1,15 @@
 import express from "express";
 import { MongoClient, ServerApiVersion } from "mongodb";
+import admin from "firebase-admin";
+import fs from "fs";
+
+const serviceAccount = JSON.parse(
+	fs.readFileSync("my-tribe-firebase-credentials.json")
+);
+
+admin.initializeApp({
+	credential: admin.credential.cert(serviceAccount),
+});
 
 const tribes = [
 	{
@@ -50,15 +60,26 @@ app.get("/api/tribes/:slug", async (req, res) => {
 	res.json({ tribe });
 });
 
-app.post("/api/tribes/:slug/suggest", async (req, res) => {
+app.use(async function (req, res, next) {
+	const authToken = req.headers.authtoken;
+	if (authToken) {
+		const user = await admin.auth().verifyIdToken(authToken);
+		req.user = user;
+		next();
+	} else {
+		res.status(400).json({ error: "Missing auth token" });
+	}
+});
+
+app.post("/api/tribes/:slug/suggest-next-read", async (req, res) => {
 	const { slug } = req.params;
-	const { suggestion, suggestedBy } = req.body;
-	const newSuggestion = { suggestion, suggestedBy };
+	const { book, author, suggestedBy } = req.body;
+	const suggestedRead = { book, author, suggestedBy };
 
 	const tribe = await db.collection("tribes").findOneAndUpdate(
 		{ slug },
 		{
-			$push: { suggestions: newSuggestion },
+			$push: { suggestedReads: suggestedRead },
 		},
 		{ returnDocument: "after" }
 	);
@@ -67,14 +88,26 @@ app.post("/api/tribes/:slug/suggest", async (req, res) => {
 
 app.post("/api/tribes/:slug/upvote", async (req, res) => {
 	const { slug } = req.params;
-	const tribe = await db.collection("tribes").findOneAndUpdate(
-		{ slug },
-		{
-			$inc: { upvotes: 1 },
-		},
-		{ returnDocument: "after" }
-	);
-	res.json({ tribe });
+	const upvoteId = req.user.uid;
+
+	const tribe = await db.collection("tribes").findOne({ slug });
+
+	const upvoteIds = tribe.upvoteIds || [];
+	const canUpvote = upvoteId && !upvoteIds.includes(upvoteId);
+
+	if (canUpvote) {
+		const updatedTribe = await db.collection("tribes").findOneAndUpdate(
+			{ slug },
+			{
+				$inc: { upvotes: 1 },
+				$push: { upvoteIds: upvoteId },
+			},
+			{ returnDocument: "after" }
+		);
+		res.json({ updatedTribe });
+	} else {
+		res.sendStatus(403);
+	}
 });
 
 async function startServer() {
