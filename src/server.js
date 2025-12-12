@@ -2,6 +2,13 @@ import express from "express";
 import { MongoClient, ServerApiVersion } from "mongodb";
 import admin from "firebase-admin";
 import fs from "fs";
+import path from "path";
+import dotenv from "dotenv";
+dotenv.config();
+
+import { fileURLToPath } from "url";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const serviceAccount = JSON.parse(
 	fs.readFileSync("my-tribe-firebase-credentials.json")
@@ -11,30 +18,6 @@ admin.initializeApp({
 	credential: admin.credential.cert(serviceAccount),
 });
 
-const tribes = [
-	{
-		name: "Tribe A",
-		slug: "tribe-a",
-		members: 10,
-		upvotes: 5,
-		suggestions: [],
-	},
-	{
-		name: "Tribe B",
-		slug: "tribe-b",
-		members: 25,
-		upvotes: 10,
-		suggestions: [],
-	},
-	{
-		name: "Tribe C",
-		slug: "tribe-c",
-		members: 15,
-		upvotes: 8,
-		suggestions: [],
-	},
-];
-
 const app = express();
 
 app.use(express.json());
@@ -42,7 +25,9 @@ app.use(express.json());
 let db;
 
 async function connectToDatabase() {
-	const uri = "mongodb://127.0.0.1:27017";
+	const uri = !process.env.MONGODB_USERNAME
+		? "mongodb://127.0.0.1:27017"
+		: `mongodb+srv://${process.env.MONGODB_USERNAME}:${process.env.MONGODB_PASSWORD}@${process.env.MONGODB_DATABASE}/?appName=${process.env.MONGODB_APP_NAME}`;
 	const client = new MongoClient(uri, {
 		serverApi: {
 			version: ServerApiVersion.v1,
@@ -53,6 +38,17 @@ async function connectToDatabase() {
 	await client.connect();
 	db = client.db("my-tribe-db");
 }
+
+app.use(express.static(path.join(__dirname, "../dist")));
+
+app.get(/^(?!\/api).+/, (req, res) => {
+	res.sendFile(path.join(__dirname, "../dist/index.html"));
+});
+
+app.get("/api/tribes", async (req, res) => {
+	const tribes = await db.collection("tribes").find({}).toArray();
+	res.json({ tribes });
+});
 
 app.get("/api/tribes/:slug", async (req, res) => {
 	const { slug } = req.params;
@@ -110,10 +106,12 @@ app.post("/api/tribes/:slug/upvote", async (req, res) => {
 	}
 });
 
+const PORT = process.env.PORT || 8000;
+
 async function startServer() {
 	await connectToDatabase();
-	app.listen(8000, function () {
-		console.log("Listening on port 8000...");
+	app.listen(PORT, function () {
+		console.log(`Listening on port ${PORT}...`);
 	});
 }
 startServer();

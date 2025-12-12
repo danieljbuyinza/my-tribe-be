@@ -1,5 +1,8 @@
 .DS_Store
+.env
 .tmp
+
 node_modules
 
 my-tribe-firebase-credentials.json
+prod-env.yaml
